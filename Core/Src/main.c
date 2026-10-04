@@ -24,6 +24,7 @@
 #include "usb_device.h"
 #include "gpio.h"
 #include "cs43l22_custom.h"
+#include "DSP/LowPassFilter_FirstOrder.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -39,9 +40,14 @@
 /* USER CODE BEGIN PD */
 
 #define BUFFER_SIZE 128
+#define SAMPLE_RATE_HZ 48000.0f
 
 #define INT16_TO_FLOAT (1.0f / 32768.0f)
 #define FLOAT_TO_INT16 (32768.0f)
+
+
+#define DEBUG_BUFFER_SIZE 1000	/* Debug */
+
 
 
 /* USER CODE END PD */
@@ -58,10 +64,22 @@
 int16_t dacBuffer[BUFFER_SIZE];
 int16_t adcBuffer[BUFFER_SIZE];
 
+
+
 static volatile int16_t *inBufPtr;
 static volatile int16_t *outBufPtr = &dacBuffer[0];
 
 volatile uint8_t dataReadyFlag;
+volatile float traceOutput = 0.0f;
+
+LowPass_FirstOrder lpFilt;
+
+
+
+// debug
+float debugBuffer[DEBUG_BUFFER_SIZE];
+volatile int debugIndex = 0;
+
 
 /* USER CODE END PV */
 
@@ -89,6 +107,8 @@ void HAL_I2S_TxCpltCallback (I2S_HandleTypeDef * hi2s){
 
 	dataReadyFlag = 1;
 }
+
+
 
 
 void processData(void) {
@@ -129,8 +149,16 @@ void processData(void) {
         }
 
 
-        leftOut = testTone;
-        rightOut = testTone;
+        traceOutput = LowPass_FirstOrder_Update(&lpFilt, testTone);
+
+        // debug buffer
+        if (debugIndex < DEBUG_BUFFER_SIZE) {
+            debugBuffer[debugIndex] = traceOutput;
+            debugIndex++;
+        }
+
+        leftOut = traceOutput;
+        rightOut = traceOutput;
 
 
         // convert back to in16_t and send to DAC
@@ -178,13 +206,17 @@ int main(void)
   MX_USB_DEVICE_Init();
   /* USER CODE BEGIN 2 */
 
+  /* Initialize Codec */
   HAL_GPIO_WritePin(GPIOD, GPIO_PIN_4, GPIO_PIN_SET);
   HAL_Delay(10);
-
   CS43L22_Init();
 
 
   HAL_I2S_Transmit_DMA(&hi2s3, (uint16_t*)dacBuffer, BUFFER_SIZE);
+
+  /* Initialize Filters */
+  LowPass_FirstOrder_Init(&lpFilt, 10000.0f, SAMPLE_RATE_HZ);
+
 
 
   /* USER CODE END 2 */
